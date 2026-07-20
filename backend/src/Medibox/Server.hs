@@ -1,21 +1,22 @@
--- | HTTP + WebSocket server. A single @/ws@ endpoint: on connect the
--- client gets a full 'Medibox.Protocol.Snapshot', after that it's
--- pure push in both directions.
+{- | HTTP + WebSocket server. A single @/ws@ endpoint: on connect the
+client gets a full 'Medibox.Protocol.Snapshot', after that it's
+pure push in both directions.
+-}
 module Medibox.Server (runServer) where
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.STM (atomically, readTChan)
 import Control.Exception (finally)
 import Control.Monad (forever, void)
-import Data.Foldable (for_)
 import Data.Aeson (decode, encode)
-import qualified Network.Wai as Wai
-import Network.Wai.Handler.Warp (run)
-import Network.Wai.Handler.WebSockets (websocketsOr)
-import qualified Network.WebSockets as WS
+import Data.Foldable (for_)
 import Medibox.Protocol (ServerMsg)
 import Medibox.Sync (Sync)
-import qualified Medibox.Sync as Sync
+import Medibox.Sync qualified as Sync
+import Network.Wai qualified as Wai
+import Network.Wai.Handler.Warp (run)
+import Network.Wai.Handler.WebSockets (websocketsOr)
+import Network.WebSockets qualified as WS
 
 runServer :: Int -> Sync -> IO ()
 runServer port sync =

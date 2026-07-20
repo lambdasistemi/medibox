@@ -1,10 +1,18 @@
-{ pkgs, checks }:
+{ pkgs, hpkgs, checks }:
 let
-  runnable = { inherit (checks) lint; };
+  format = pkgs.writeShellApplication {
+    name = "format";
+    runtimeInputs = [ hpkgs.fourmolu ];
+    text = ''
+      fourmolu -i backend/app backend/src backend/test
+    '';
+  };
+
+  runnable = { inherit (checks) lint; } // { inherit format; };
 in
 builtins.mapAttrs
-  (_: check: {
+  (_: prog: {
     type = "app";
-    program = pkgs.lib.getExe check;
+    program = pkgs.lib.getExe prog;
   })
   runnable

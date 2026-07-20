@@ -1,21 +1,22 @@
--- | Wires 'Medibox.Midi', 'Medibox.Store' and connected WebSocket
--- clients together: the single source of truth for "what track is
--- active" and the fan-out point for state changes.
-module Medibox.Sync
-    ( Sync
-    , newSync
-    , onMidiCC
-    , subscribe
-    , handleClientMsg
-    , snapshot
-    ) where
+{- | Wires 'Medibox.Midi', 'Medibox.Store' and connected WebSocket
+clients together: the single source of truth for "what track is
+active" and the fan-out point for state changes.
+-}
+module Medibox.Sync (
+    Sync,
+    newSync,
+    onMidiCC,
+    subscribe,
+    handleClientMsg,
+    snapshot,
+) where
 
 import Control.Concurrent.STM
 import Control.Monad (forM_, void)
 import Medibox.Midi (Midi, sendCC)
 import Medibox.Protocol
 import Medibox.Store (Store)
-import qualified Medibox.Store as Store
+import Medibox.Store qualified as Store
 
 data Sync = Sync
     { syncStore :: Store
@@ -31,28 +32,30 @@ newSync store midi = do
     initialSong <- maybe (pure Nothing) (Store.trackSongOf store) initialTrack
     songVar <- newTVarIO initialSong
     trackVar <- newTVarIO initialTrack
-    chan <- newBroadcastTChanIO
-    pure $ Sync store midi songVar trackVar chan
+    Sync store midi songVar trackVar <$> newBroadcastTChanIO
 
--- | Subscribe a fresh listener to server-pushed messages (typically
--- one per connected WebSocket client).
+{- | Subscribe a fresh listener to server-pushed messages (typically
+one per connected WebSocket client).
+-}
 subscribe :: Sync -> IO (TChan ServerMsg)
 subscribe sync = atomically $ dupTChan (syncBroadcast sync)
 
 publish :: Sync -> ServerMsg -> IO ()
 publish sync msg = atomically $ writeTChan (syncBroadcast sync) msg
 
--- | Called from the MIDI input thread whenever the BCR2000 sends a
--- Control Change: persists the value against whatever track is
--- currently active and tells every connected browser.
+{- | Called from the MIDI input thread whenever the BCR2000 sends a
+Control Change: persists the value against whatever track is
+currently active and tells every connected browser.
+-}
 onMidiCC :: Sync -> Int -> Int -> IO ()
 onMidiCC sync cc v = do
     mtid <- readTVarIO (syncCurrentTrack sync)
     forM_ mtid $ \tid -> Store.setParam (syncStore sync) tid cc v
     publish sync $ ParamUpdate cc v
 
--- | The full state a freshly connected (or just-switched) client
--- should see.
+{- | The full state a freshly connected (or just-switched) client
+should see.
+-}
 snapshot :: Sync -> IO ServerMsg
 snapshot sync = do
     let store = syncStore sync
@@ -67,10 +70,11 @@ snapshot sync = do
         Just tid -> Store.loadTrackParams store tid
     pure $ Snapshot songs tracks msid mtid params
 
--- | React to a message coming in from one connected browser.
--- Returns the messages to broadcast to *every* client (the caller
--- also owns replying only to the sender when that's cheaper, but for
--- simplicity everything here is broadcast).
+{- | React to a message coming in from one connected browser.
+Returns the messages to broadcast to *every* client (the caller
+also owns replying only to the sender when that's cheaper, but for
+simplicity everything here is broadcast).
+-}
 handleClientMsg :: Sync -> ClientMsg -> IO ()
 handleClientMsg sync = \case
     SetParam cc v -> do
@@ -85,7 +89,7 @@ handleClientMsg sync = \case
             writeTVar (syncCurrentTrack sync) (Just tid)
         Store.setCurrentTrackId (syncStore sync) tid
         params <- Store.loadTrackParams (syncStore sync) tid
-        forM_ params $ \(cc, v) -> sendCC (syncMidi sync) cc v
+        forM_ params $ uncurry (sendCC (syncMidi sync))
         snap <- snapshot sync
         publish sync snap
     SelectSong sid -> do

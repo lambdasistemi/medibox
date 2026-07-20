@@ -1,20 +1,21 @@
--- | SQLite persistence: songs, tracks, and per-track CC parameter
--- values.
-module Medibox.Store
-    ( Store
-    , openStore
-    , Song (..)
-    , Track (..)
-    , listSongs
-    , listTracks
-    , createSong
-    , createTrack
-    , loadTrackParams
-    , trackSongOf
-    , setParam
-    , currentTrackId
-    , setCurrentTrackId
-    ) where
+{- | SQLite persistence: songs, tracks, and per-track CC parameter
+values.
+-}
+module Medibox.Store (
+    Store,
+    openStore,
+    Song (..),
+    Track (..),
+    listSongs,
+    listTracks,
+    createSong,
+    createTrack,
+    loadTrackParams,
+    trackSongOf,
+    setParam,
+    currentTrackId,
+    setCurrentTrackId,
+) where
 
 import Data.Text (Text)
 import Database.SQLite.Simple
@@ -27,8 +28,9 @@ data Song = Song {songId :: Int, songName :: Text}
 data Track = Track {trackId :: Int, trackSongId :: Int, trackName :: Text, trackPosition :: Int}
     deriving (Eq, Show)
 
--- | Open (creating if needed) the sqlite database at the given path
--- and ensure the schema exists.
+{- | Open (creating if needed) the sqlite database at the given path
+and ensure the schema exists.
+-}
 openStore :: FilePath -> IO Store
 openStore path = do
     conn <- open path
@@ -78,8 +80,9 @@ createTrack (Store conn) sid name = do
     tid <- fromIntegral <$> lastInsertRowId conn
     pure $ Track tid sid name nextPos
 
--- | Every CC/value pair stored for a track (missing CCs are simply
--- absent, the caller decides on a default).
+{- | Every CC/value pair stored for a track (missing CCs are simply
+absent, the caller decides on a default).
+-}
 loadTrackParams :: Store -> Int -> IO [(Int, Int)]
 loadTrackParams (Store conn) tid =
     query conn "SELECT cc, value FROM parameters WHERE track_id = ?" (Only tid)
