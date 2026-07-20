@@ -22,8 +22,10 @@ import Database.SQLite.Simple
 newtype Store = Store Connection
 
 data Song = Song {songId :: Int, songName :: Text}
+    deriving (Eq, Show)
 
 data Track = Track {trackId :: Int, trackSongId :: Int, trackName :: Text, trackPosition :: Int}
+    deriving (Eq, Show)
 
 -- | Open (creating if needed) the sqlite database at the given path
 -- and ensure the schema exists.

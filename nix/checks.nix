@@ -7,8 +7,8 @@
     runtimeInputs = [ hpkgs.fourmolu hpkgs.hlint ];
     text = ''
       cd "${../. + "/"}"
-      fourmolu -m check backend/app backend/src
-      hlint backend/app backend/src
+      fourmolu -m check backend/app backend/src backend/test
+      hlint backend/app backend/src backend/test
     '';
   };
 }

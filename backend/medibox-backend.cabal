@@ -8,16 +8,10 @@ maintainer:         paolo.veronelli@gmail.com
 category:           Sound
 build-type:         Simple
 
-executable medibox-backend
-    main-is:          Main.hs
-    hs-source-dirs:   app, src
-    other-modules:
-        Medibox.Midi
-        Medibox.Store
-        Medibox.Protocol
-        Medibox.Sync
-        Medibox.Server
+common warnings
+    ghc-options:      -Wall
 
+common extensions
     default-language: GHC2021
     default-extensions:
         LambdaCase
@@ -25,7 +19,16 @@ executable medibox-backend
         RecordWildCards
         ViewPatterns
 
-    ghc-options:      -Wall -threaded -O0
+library
+    import:           warnings, extensions
+    hs-source-dirs:   src
+    exposed-modules:
+        Medibox.Midi
+        Medibox.Store
+        Medibox.Protocol
+        Medibox.Sync
+        Medibox.Server
+
     build-depends:
         base >=4.18 && <5,
         aeson,
@@ -40,3 +43,31 @@ executable medibox-backend
         wai-websockets,
         warp,
         websockets
+
+executable medibox-backend
+    import:           warnings, extensions
+    main-is:          Main.hs
+    hs-source-dirs:   app
+    ghc-options:      -threaded -O0
+    build-depends:
+        base,
+        medibox-backend
+
+test-suite medibox-backend-test
+    import:           warnings, extensions
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    hs-source-dirs:   test
+    other-modules:
+        Medibox.StoreSpec
+        Medibox.ProtocolSpec
+
+    build-tool-depends: hspec-discover:hspec-discover
+    build-depends:
+        base,
+        medibox-backend,
+        aeson,
+        hspec,
+        QuickCheck,
+        sqlite-simple,
+        text

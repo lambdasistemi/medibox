@@ -16,10 +16,10 @@ import GHC.Generics (Generic)
 import Medibox.Store (Song (..), Track (..))
 
 data SongInfo = SongInfo {siId :: Int, siName :: Text}
-    deriving (Generic)
+    deriving (Eq, Show, Generic)
 
 data TrackInfo = TrackInfo {tiId :: Int, tiName :: Text, tiPosition :: Int}
-    deriving (Generic)
+    deriving (Eq, Show, Generic)
 
 fromSong :: Song -> SongInfo
 fromSong (Song i n) = SongInfo i n
@@ -45,6 +45,7 @@ data ServerMsg
         }
     | -- | One parameter changed (from the device or another client).
       ParamUpdate {puCC :: Int, puValue :: Int}
+    deriving (Eq, Show)
 
 instance ToJSON ServerMsg where
     toJSON Snapshot{..} =
@@ -66,6 +67,7 @@ data ClientMsg
     | SetParam {spCC :: Int, spValue :: Int}
     | CreateSong Text
     | CreateTrack {ctSongId :: Int, ctName :: Text}
+    deriving (Eq, Show)
 
 instance FromJSON ClientMsg where
     parseJSON = withObject "ClientMsg" $ \o -> do
