@@ -18,6 +18,10 @@ build-frontend:
 dev-backend:
     cd backend && cabal run -O0 medibox-backend
 
+# Run the backend test suite
+test-backend:
+    cd backend && cabal test -O0
+
 # Rebuild the frontend on change
 dev-frontend:
     cd frontend && spago build --watch
@@ -35,13 +39,13 @@ bundle-frontend:
 
 # Format both sides
 format:
-    cd backend && fourmolu -i app src
+    cd backend && fourmolu -i app src test
     cd frontend && purs-tidy format-in-place 'src/**/*.purs'
 
 # Lint both sides
 lint:
-    cd backend && hlint app src
+    cd backend && hlint app src test
     cd frontend && purs-tidy check 'src/**/*.purs'
 
 # Full local CI
-ci: build-backend build-frontend lint
+ci: build-backend test-backend build-frontend lint
