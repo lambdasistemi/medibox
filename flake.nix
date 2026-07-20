@@ -42,7 +42,7 @@
         };
 
         inherit checks;
-        apps = import ./nix/apps.nix { inherit pkgs checks; };
+        apps = import ./nix/apps.nix { inherit pkgs hpkgs checks; };
 
         devShells.default = shell;
       });

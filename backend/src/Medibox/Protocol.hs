@@ -1,13 +1,14 @@
--- | JSON wire protocol between the backend and the PureScript
--- frontend. Kept intentionally small and flat.
-module Medibox.Protocol
-    ( SongInfo (..)
-    , TrackInfo (..)
-    , fromSong
-    , fromTrack
-    , ServerMsg (..)
-    , ClientMsg (..)
-    ) where
+{- | JSON wire protocol between the backend and the PureScript
+frontend. Kept intentionally small and flat.
+-}
+module Medibox.Protocol (
+    SongInfo (..),
+    TrackInfo (..),
+    fromSong,
+    fromTrack,
+    ServerMsg (..),
+    ClientMsg (..),
+) where
 
 import Data.Aeson
 import Data.Aeson.Types (Parser)

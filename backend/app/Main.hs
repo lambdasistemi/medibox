@@ -1,15 +1,16 @@
 module Main (main) where
 
+import Data.Maybe (fromMaybe)
 import Medibox.Midi (listen, withMidi)
 import Medibox.Server (runServer)
 import Medibox.Store (openStore)
 import Medibox.Sync (newSync, onMidiCC)
-import Data.Maybe (fromMaybe)
 import System.Environment (lookupEnv)
 
--- | The MIDI channel the BCR2000 is configured to use for its
--- control-change layer. Observed default on this unit is 1;
--- override with @MEDIBOX_MIDI_CHANNEL@ if yours differs.
+{- | The MIDI channel the BCR2000 is configured to use for its
+control-change layer. Observed default on this unit is 1;
+override with @MEDIBOX_MIDI_CHANNEL@ if yours differs.
+-}
 defaultMidiChannel :: Int
 defaultMidiChannel = 1
 
