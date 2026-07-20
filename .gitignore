@@ -5,3 +5,8 @@ cabal-dev
 *.chi
 *.chs.h
 .virthualenv
+result
+dist-newstyle
+*.db
+node_modules
+frontend/dist/index.js
