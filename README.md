@@ -13,13 +13,19 @@ nix develop
 just build-backend
 just test-backend
 just dev-backend   # needs ALSA + a BCR2000 connected (or aseqdump/amidi for testing)
+
+just build-frontend
+just bundle-frontend  # writes frontend/dist/index.js
 ```
+
+Serve `frontend/dist/` with any static file server while `medibox-backend`
+is running on `localhost:8080` to use the UI.
 
 See `justfile` for the full recipe list. `nix/` holds the flake split
 (`project.nix`/`checks.nix`/`apps.nix`); `backend/` is the Haskell
-sync server, `frontend/` will hold the PureScript/Halogen UI,
-`legacy/` is the original 2015 CLI sequencer + gtk2hs knob panel kept
-for reference.
+sync server, `frontend/` is the PureScript/Halogen UI, `legacy/` is
+the original 2015 CLI sequencer + gtk2hs knob panel kept for
+reference.
 
 ## License
 

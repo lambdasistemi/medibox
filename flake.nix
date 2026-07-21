@@ -32,7 +32,7 @@
         };
         project = import ./nix/project.nix { inherit pkgs; };
         inherit (project) hpkgs backend frontend shell;
-        checks = import ./nix/checks.nix { inherit pkgs hpkgs backend; };
+        checks = import ./nix/checks.nix { inherit pkgs hpkgs backend frontend; };
       in {
         packages = {
           inherit backend frontend;

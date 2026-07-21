@@ -6,10 +6,14 @@ package:
     - aff
     - console
     - halogen
+    - arrays
     - argonaut-core
     - argonaut-codecs
+    - either
+    - integers
     - ordered-collections
     - maybe
+    - tuples
   bundle:
     module: Main
     outfile: dist/index.js
