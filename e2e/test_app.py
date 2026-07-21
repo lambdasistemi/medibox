@@ -80,7 +80,12 @@ def main():
                 with sync_playwright() as p:
                     # --no-sandbox: CI runners commonly lack the user-namespace
                     # permissions Chromium's own sandbox needs.
-                    browser = p.chromium.launch(args=["--no-sandbox"])
+                    # --disable-dev-shm-usage: /dev/shm is often tiny (or a
+                    # restrictive tmpfs) in CI containers, which otherwise
+                    # crashes the renderer process right after launch.
+                    browser = p.chromium.launch(
+                        args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+                    )
                     page = browser.new_page()
                     console_errors = []
                     page.on(
