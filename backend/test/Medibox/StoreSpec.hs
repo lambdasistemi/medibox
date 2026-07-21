@@ -16,7 +16,7 @@ spec = around (\act -> openStore ":memory:" >>= act) $ do
         it "lists a created song" $ \store -> do
             song <- createSong store "Test Song"
             songs <- listSongs store
-            map songId songs `shouldBe` [songId song]
+            map songId songs `shouldContain` [songId song]
 
         it "lists tracks for a song in position order" $ \store -> do
             song <- createSong store "Song"
@@ -68,8 +68,8 @@ spec = around (\act -> openStore ":memory:" >>= act) $ do
             paramsB `shouldBe` []
 
     describe "current track" $ do
-        it "has no current track before one is set" $ \store ->
-            currentTrackId store `shouldReturn` Nothing
+        it "defaults to the auto-created Default track on a fresh store" $ \store ->
+            currentTrackId store `shouldReturn` Just 1
 
         it "remembers the current track across reads" $ \store -> do
             song <- createSong store "S"
