@@ -107,6 +107,20 @@ spec = around (\act -> openStore ":memory:" >>= act) $ do
             paramsB <- loadTrackParams store (trackId trackB)
             nameOf 3 paramsB `shouldBe` Nothing
 
+    describe "renaming songs and tracks" $ do
+        it "renames a song" $ \store -> do
+            song <- createSong store "Old"
+            renameSong store (songId song) "New"
+            songs <- listSongs store
+            map songName (filter ((== songId song) . songId) songs) `shouldBe` ["New"]
+
+        it "renames a track" $ \store -> do
+            song <- createSong store "S"
+            track <- createTrack store (songId song) "Old"
+            renameTrack store (trackId track) "New"
+            tracks <- listTracks store (songId song)
+            map trackName (filter ((== trackId track) . trackId) tracks) `shouldBe` ["New"]
+
     describe "duplication" $ do
         it "duplicateTrack copies values and names into a new track" $ \store -> do
             song <- createSong store "S"

@@ -83,6 +83,8 @@ data ClientMsg
     | RenameParam {rpCC :: Int, rpName :: Text}
     | CreateSong Text
     | CreateTrack {ctSongId :: Int, ctName :: Text}
+    | RenameSong {rsSongId :: Int, rsName :: Text}
+    | RenameTrack {rtTrackId :: Int, rtName :: Text}
     | DuplicateSong {dsSongId :: Int}
     | DuplicateTrack {dtTrackId :: Int, dtTargetSongId :: Int}
     deriving (Eq, Show)
@@ -97,6 +99,8 @@ instance FromJSON ClientMsg where
             "renameParam" -> RenameParam <$> o .: "cc" <*> o .: "name"
             "createSong" -> CreateSong <$> o .: "name"
             "createTrack" -> CreateTrack <$> o .: "songId" <*> o .: "name"
+            "renameSong" -> RenameSong <$> o .: "songId" <*> o .: "name"
+            "renameTrack" -> RenameTrack <$> o .: "trackId" <*> o .: "name"
             "duplicateSong" -> DuplicateSong <$> o .: "songId"
             "duplicateTrack" -> DuplicateTrack <$> o .: "trackId" <*> o .: "targetSongId"
             other -> fail $ "unknown client message tag: " ++ show other
