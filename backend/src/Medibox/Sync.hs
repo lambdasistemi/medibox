@@ -82,16 +82,7 @@ handleClientMsg sync = \case
         forM_ mtid $ \tid -> Store.setParam (syncStore sync) tid cc v
         sendCC (syncMidi sync) cc v
         publish sync $ ParamUpdate cc v
-    SelectTrack tid -> do
-        msid <- Store.trackSongOf (syncStore sync) tid
-        atomically $ do
-            forM_ msid $ writeTVar (syncCurrentSong sync) . Just
-            writeTVar (syncCurrentTrack sync) (Just tid)
-        Store.setCurrentTrackId (syncStore sync) tid
-        params <- Store.loadTrackParams (syncStore sync) tid
-        forM_ params $ \p -> sendCC (syncMidi sync) (Store.paramCC p) (Store.paramValue p)
-        snap <- snapshot sync
-        publish sync snap
+    SelectTrack tid -> selectTrack sync tid
     SelectSong sid -> do
         -- Song selection only changes which track list the browser
         -- shows; the active track (and its MIDI push) is chosen by a
@@ -117,10 +108,29 @@ handleClientMsg sync = \case
     DuplicateSong sid -> do
         newSong <- Store.duplicateSong (syncStore sync) sid
         atomically $ writeTVar (syncCurrentSong sync) (Just (Store.songId newSong))
-        snap <- snapshot sync
-        publish sync snap
+        newTracks <- Store.listTracks (syncStore sync) (Store.songId newSong)
+        case newTracks of
+            (t : _) -> selectTrack sync (Store.trackId t)
+            [] -> do
+                snap <- snapshot sync
+                publish sync snap
     DuplicateTrack tid targetSid -> do
-        void $ Store.duplicateTrack (syncStore sync) tid targetSid
+        newTrack <- Store.duplicateTrack (syncStore sync) tid targetSid
         atomically $ writeTVar (syncCurrentSong sync) (Just targetSid)
-        snap <- snapshot sync
-        publish sync snap
+        selectTrack sync (Store.trackId newTrack)
+
+{- | Make the given track the active one: persists the selection,
+pushes every one of its stored values out over MIDI, and
+broadcasts the resulting snapshot to every client.
+-}
+selectTrack :: Sync -> Int -> IO ()
+selectTrack sync tid = do
+    msid <- Store.trackSongOf (syncStore sync) tid
+    atomically $ do
+        forM_ msid $ writeTVar (syncCurrentSong sync) . Just
+        writeTVar (syncCurrentTrack sync) (Just tid)
+    Store.setCurrentTrackId (syncStore sync) tid
+    params <- Store.loadTrackParams (syncStore sync) tid
+    forM_ params $ \p -> sendCC (syncMidi sync) (Store.paramCC p) (Store.paramValue p)
+    snap <- snapshot sync
+    publish sync snap
