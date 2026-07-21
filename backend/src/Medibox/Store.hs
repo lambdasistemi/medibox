@@ -11,6 +11,8 @@ module Medibox.Store (
     listTracks,
     createSong,
     createTrack,
+    renameSong,
+    renameTrack,
     duplicateSong,
     duplicateTrack,
     loadTrackParams,
@@ -122,6 +124,14 @@ createTrack (Store conn) sid name = do
         (sid, name, nextPos :: Int)
     tid <- fromIntegral <$> lastInsertRowId conn
     pure $ Track tid sid name nextPos
+
+renameSong :: Store -> Int -> Text -> IO ()
+renameSong (Store conn) sid name =
+    execute conn "UPDATE songs SET name = ? WHERE id = ?" (name, sid)
+
+renameTrack :: Store -> Int -> Text -> IO ()
+renameTrack (Store conn) tid name =
+    execute conn "UPDATE tracks SET name = ? WHERE id = ?" (name, tid)
 
 {- | Copy a track's stored parameters (values and names) onto another
 track. Internal helper for duplication.

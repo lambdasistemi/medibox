@@ -105,6 +105,14 @@ handleClientMsg sync = \case
         forM_ mtid $ \tid -> Store.renameParam (syncStore sync) tid cc name
         snap <- snapshot sync
         publish sync snap
+    RenameSong sid name -> do
+        Store.renameSong (syncStore sync) sid name
+        snap <- snapshot sync
+        publish sync snap
+    RenameTrack tid name -> do
+        Store.renameTrack (syncStore sync) tid name
+        snap <- snapshot sync
+        publish sync snap
     DuplicateSong sid -> do
         newSong <- Store.duplicateSong (syncStore sync) sid
         atomically $ writeTVar (syncCurrentSong sync) (Just (Store.songId newSong))

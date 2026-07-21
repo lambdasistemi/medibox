@@ -73,6 +73,14 @@ spec = do
             decode "{\"tag\":\"renameParam\",\"cc\":19,\"name\":\"Cutoff\"}"
                 `shouldBe` Just (RenameParam 19 "Cutoff")
 
+        it "decodes renameSong" $
+            decode "{\"tag\":\"renameSong\",\"songId\":1,\"name\":\"New\"}"
+                `shouldBe` Just (RenameSong 1 "New")
+
+        it "decodes renameTrack" $
+            decode "{\"tag\":\"renameTrack\",\"trackId\":1,\"name\":\"New\"}"
+                `shouldBe` Just (RenameTrack 1 "New")
+
         it "decodes duplicateSong" $
             decode "{\"tag\":\"duplicateSong\",\"songId\":1}"
                 `shouldBe` Just (DuplicateSong 1)
