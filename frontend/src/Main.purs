@@ -12,6 +12,7 @@ import Data.Int as Int
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Tuple (Tuple(..))
 import Effect (Effect)
 import Effect.Class (class MonadEffect)
 import Effect.Console (log)
@@ -24,7 +25,10 @@ import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Subscription as HS
 import Halogen.VDom.Driver (runUI)
+import Web.Event.Event as Event
+import Web.UIEvent.KeyboardEvent as Keyboard
 import Web.UIEvent.MouseEvent as Mouse
+import Web.UIEvent.WheelEvent as Wheel
 
 main :: Effect Unit
 main = HA.runHalogenAff do
@@ -42,6 +46,22 @@ type TrackInfo =
   , position :: Int
   }
 
+type ParamState =
+  { value :: Int
+  , name :: Maybe String
+  }
+
+type SnapshotParam =
+  { cc :: Int
+  , value :: Int
+  , name :: Maybe String
+  }
+
+type ParamNameEdit =
+  { cc :: Int
+  , draft :: String
+  }
+
 data Theme
   = Light
   | Dark
@@ -53,9 +73,11 @@ type State =
   , tracks :: Array TrackInfo
   , currentSong :: Maybe Int
   , currentTrack :: Maybe Int
-  , params :: Map Int Int
+  , params :: Map Int ParamState
   , newSongName :: String
   , newTrackName :: String
+  , duplicateTrackTargetSong :: Maybe Int
+  , editingParamName :: Maybe ParamNameEdit
   , connection :: Maybe WS.WebSocketConnection
   , theme :: Theme
   }
@@ -68,7 +90,7 @@ type SnapshotPayload =
   , tracks :: Array TrackInfo
   , currentSong :: Maybe Int
   , currentTrack :: Maybe Int
-  , params :: Map Int Int
+  , params :: Array SnapshotParam
   }
 
 type ParamUpdatePayload =
@@ -84,8 +106,11 @@ data ClientMessage
   = SelectSongMessage Int
   | SelectTrackMessage Int
   | SetParamMessage Int Int
+  | RenameParamMessage Int String
   | CreateSongMessage String
   | CreateTrackMessage Int String
+  | DuplicateSongMessage Int
+  | DuplicateTrackMessage Int Int
 
 data Action
   = Initialize
@@ -96,12 +121,20 @@ data Action
   | SelectTrack Int
   | UpdateNewSongName String
   | UpdateNewTrackName String
+  | SelectDuplicateTrackTarget Int
   | CreateSong
   | CreateTrack
+  | DuplicateSong
+  | DuplicateTrack
   | ToggleTheme
   | IgnoreSelection
+  | StartParamNameEdit Int
+  | UpdateParamNameDraft String
+  | CommitParamNameEdit
+  | CommitParamNameEditOnKey String
   | StartParamDrag Int Int Int
   | SetParamFromDrag Int Int
+  | SetParamFromWheel Int Wheel.WheelEvent
   | EndParamDrag H.SubscriptionId
 
 component :: forall query input output m. MonadEffect m => H.Component query input output m
@@ -123,6 +156,8 @@ initialState _ =
   , params: Map.empty
   , newSongName: ""
   , newTrackName: ""
+  , duplicateTrackTargetSong: Nothing
+  , editingParamName: Nothing
   , connection: Nothing
   , theme: Dark
   }
@@ -182,6 +217,13 @@ songsPanel st =
             , HE.onClick \_ -> CreateSong
             ]
             [ HH.text "Create Song" ]
+        , HH.button
+            [ HP.type_ HP.ButtonButton
+            , HP.disabled (st.currentSong == Nothing)
+            , HP.style (createButtonStyle st.theme (st.currentSong == Nothing))
+            , HE.onClick \_ -> DuplicateSong
+            ]
+            [ HH.text "Duplicate" ]
         ]
     ]
 
@@ -227,10 +269,20 @@ tracksPanel st =
             , HE.onClick \_ -> CreateTrack
             ]
             [ HH.text "Create Track" ]
+        , duplicateTargetSongSelect st.theme noTrackSelected (duplicateTrackTargetSongId st) st.songs
+        , HH.button
+            [ HP.type_ HP.ButtonButton
+            , HP.disabled noTrackSelected
+            , HP.style (createButtonStyle st.theme noTrackSelected)
+            , HE.onClick \_ -> DuplicateTrack
+            ]
+            [ HH.text "Duplicate" ]
         ]
     ]
   where
   noSongSelected = st.currentSong == Nothing
+
+  noTrackSelected = st.currentTrack == Nothing
 
   visibleTracks = case st.currentSong of
     Nothing -> []
@@ -268,6 +320,31 @@ trackOption currentTrack track =
     ]
     [ HH.text (show track.position <> ". " <> track.name) ]
 
+duplicateTargetSongSelect
+  :: forall m
+   . Theme
+  -> Boolean
+  -> Maybe Int
+  -> Array SongInfo
+  -> H.ComponentHTML Action () m
+duplicateTargetSongSelect theme disabled targetSong songs =
+  HH.select
+    [ HP.value (selectedValue targetSong)
+    , HP.disabled disabled
+    , HP.style (selectStyle theme)
+    , HP.title "Duplicate track target song"
+    , HE.onValueChange duplicateTargetSongSelectionAction
+    ]
+    ([ placeholderOption (targetSong == Nothing) "Duplicate to..." ] <> map (duplicateTargetSongOption targetSong) songs)
+
+duplicateTargetSongOption :: forall m. Maybe Int -> SongInfo -> H.ComponentHTML Action () m
+duplicateTargetSongOption targetSong song =
+  HH.option
+    [ HP.value (show song.id)
+    , HP.selected (isSelected targetSong song.id)
+    ]
+    [ HH.text song.name ]
+
 placeholderOption :: forall m. Boolean -> String -> H.ComponentHTML Action () m
 placeholderOption selected label =
   HH.option
@@ -281,33 +358,81 @@ paramsPanel :: forall m. State -> H.ComponentHTML Action () m
 paramsPanel st =
   HH.section
     [ HP.style (paramsPanelStyle st.theme) ]
-    [ HH.h2
-        [ HP.style (panelTitleStyle st.theme) ]
-        [ HH.text "Parameters" ]
-    , HH.div
+    [ HH.div
         [ HP.style "display: grid; grid-template-columns: repeat(8, minmax(82px, 1fr)); gap: 12px; overflow-x: auto;" ]
-        (map (knobControl st.theme st.params) physicalCCs)
+        (map (knobControl st.theme st.params st.editingParamName) physicalCCs)
     ]
 
-knobControl :: forall m. Theme -> Map Int Int -> Int -> H.ComponentHTML Action () m
-knobControl theme params cc =
-  HH.button
-    [ HP.type_ HP.ButtonButton
-    , HP.style (knobButtonStyle theme)
+knobControl
+  :: forall m
+   . Theme
+  -> Map Int ParamState
+  -> Maybe ParamNameEdit
+  -> Int
+  -> H.ComponentHTML Action () m
+knobControl theme params editingParamName cc =
+  HH.div
+    [ HP.style (knobButtonStyle theme)
     , HP.title ("CC " <> show cc <> " value " <> show value)
     , HP.attr (HH.AttrName "aria-label") ("CC " <> show cc <> ", value " <> show value)
-    , HE.onMouseDown \event -> StartParamDrag cc value (Mouse.clientY event)
+    , HE.onWheel (SetParamFromWheel cc)
     ]
-    [ HH.span
-        [ HP.style (knobLabelStyle theme) ]
-        [ HH.text ("CC " <> show cc) ]
-    , knobSvg theme value
+    [ paramNameControl theme params editingParamName cc
+    , HH.button
+        [ HP.type_ HP.ButtonButton
+        , HP.style (knobDialButtonStyle theme)
+        , HP.title ("Adjust " <> paramDisplayName params cc)
+        , HP.attr (HH.AttrName "aria-label") ("Adjust " <> paramDisplayName params cc <> ", value " <> show value)
+        , HE.onMouseDown \event -> StartParamDrag cc value (Mouse.clientY event)
+        ]
+        [ knobSvg theme value ]
     , HH.span
         [ HP.style (knobValueStyle theme) ]
         [ HH.text (show value) ]
     ]
   where
   value = paramValue params cc
+
+paramNameControl
+  :: forall m
+   . Theme
+  -> Map Int ParamState
+  -> Maybe ParamNameEdit
+  -> Int
+  -> H.ComponentHTML Action () m
+paramNameControl theme params editingParamName cc =
+  case editingParamName of
+    Just edit ->
+      if edit.cc == cc then
+        HH.input
+          [ HP.type_ HP.InputText
+          , HP.value edit.draft
+          , HP.autofocus true
+          , HP.placeholder ("CC " <> show cc)
+          , HP.style (paramNameInputStyle theme)
+          , HE.onValueInput UpdateParamNameDraft
+          , HE.onBlur \_ -> CommitParamNameEdit
+          , HE.onKeyDown \event -> CommitParamNameEditOnKey (Keyboard.key event)
+          ]
+      else
+        paramNameButton theme params cc
+    _ ->
+      paramNameButton theme params cc
+
+paramNameButton
+  :: forall m
+   . Theme
+  -> Map Int ParamState
+  -> Int
+  -> H.ComponentHTML Action () m
+paramNameButton theme params cc =
+  HH.button
+    [ HP.type_ HP.ButtonButton
+    , HP.style (knobLabelButtonStyle theme)
+    , HP.title "Rename parameter"
+    , HE.onClick \_ -> StartParamNameEdit cc
+    ]
+    [ HH.text (paramDisplayName params cc) ]
 
 knobSvg :: forall m. Theme -> Int -> H.ComponentHTML Action () m
 knobSvg theme value =
@@ -374,8 +499,64 @@ svgNamespace = HH.Namespace "http://www.w3.org/2000/svg"
 physicalCCs :: Array Int
 physicalCCs = Array.range 0 31
 
-paramValue :: Map Int Int -> Int -> Int
-paramValue params cc = clampParam (fromMaybe 0 (Map.lookup cc params))
+paramsFromSnapshot :: Array SnapshotParam -> Map Int ParamState
+paramsFromSnapshot snapshotParams =
+  Map.fromFoldable (map snapshotParamTuple snapshotParams)
+
+snapshotParamTuple :: SnapshotParam -> Tuple Int ParamState
+snapshotParamTuple param =
+  Tuple param.cc
+    { value: clampParam param.value
+    , name: normalizeParamName param.name
+    }
+
+paramValue :: Map Int ParamState -> Int -> Int
+paramValue params cc = case Map.lookup cc params of
+  Just param -> clampParam param.value
+  Nothing -> 0
+
+paramDisplayName :: Map Int ParamState -> Int -> String
+paramDisplayName params cc = case Map.lookup cc params of
+  Just param -> case param.name of
+    Just name ->
+      if name == "" then fallback else name
+    _ -> fallback
+  Nothing -> fallback
+  where
+  fallback = "CC " <> show cc
+
+paramRawName :: Map Int ParamState -> Int -> String
+paramRawName params cc = case Map.lookup cc params of
+  Just param -> fromMaybe "" param.name
+  Nothing -> ""
+
+normalizeParamName :: Maybe String -> Maybe String
+normalizeParamName = case _ of
+  Just "" -> Nothing
+  other -> other
+
+setParamValueInMap :: Int -> Int -> Map Int ParamState -> Map Int ParamState
+setParamValueInMap cc rawValue params =
+  Map.insert cc { value: clampParam rawValue, name: currentName } params
+  where
+  currentName = case Map.lookup cc params of
+    Just param -> param.name
+    Nothing -> Nothing
+
+setParamNameInMap :: Int -> String -> Map Int ParamState -> Map Int ParamState
+setParamNameInMap cc name params =
+  Map.insert cc { value: paramValue params cc, name: normalizeParamName (Just name) } params
+
+duplicateTrackTargetSongId :: State -> Maybe Int
+duplicateTrackTargetSongId st = case st.duplicateTrackTargetSong of
+  Just songId -> Just songId
+  Nothing -> st.currentSong
+
+wheelParamStep :: Wheel.WheelEvent -> Int
+wheelParamStep event
+  | Wheel.deltaY event < 0.0 = 1
+  | Wheel.deltaY event > 0.0 = (-1)
+  | otherwise = 0
 
 knobAngle :: Int -> Int
 knobAngle value = (-135) + Int.quot (clampParam value * 270) 127
@@ -396,6 +577,11 @@ songSelectionAction value = case Int.fromString value of
 trackSelectionAction :: String -> Action
 trackSelectionAction value = case Int.fromString value of
   Just trackId -> SelectTrack trackId
+  Nothing -> IgnoreSelection
+
+duplicateTargetSongSelectionAction :: String -> Action
+duplicateTargetSongSelectionAction value = case Int.fromString value of
+  Just songId -> SelectDuplicateTrackTarget songId
   Nothing -> IgnoreSelection
 
 toggleTheme :: Theme -> Theme
@@ -458,11 +644,19 @@ createButtonStyle theme disabled =
 
 knobButtonStyle :: Theme -> String
 knobButtonStyle theme =
-  "display: grid; justify-items: center; gap: 8px; min-width: 82px; padding: 10px 8px; border: 1px solid " <> knobButtonBorder theme <> "; border-radius: 8px; background: " <> knobButtonBg theme <> "; color: inherit; cursor: ns-resize; user-select: none; touch-action: none;"
+  "display: grid; justify-items: center; gap: 8px; min-width: 82px; padding: 10px 8px; border: 1px solid " <> knobButtonBorder theme <> "; border-radius: 8px; background: " <> knobButtonBg theme <> "; color: inherit; user-select: none; touch-action: none; box-sizing: border-box;"
 
-knobLabelStyle :: Theme -> String
-knobLabelStyle theme =
-  "font-size: 0.76rem; font-weight: 700; color: " <> mutedTextColor theme <> "; letter-spacing: 0;"
+knobDialButtonStyle :: Theme -> String
+knobDialButtonStyle _ =
+  "width: 72px; height: 72px; padding: 0; border: 0; background: transparent; color: inherit; cursor: ns-resize; touch-action: none;"
+
+knobLabelButtonStyle :: Theme -> String
+knobLabelButtonStyle theme =
+  "width: 100%; min-width: 0; height: 20px; padding: 0 2px; border: 0; background: transparent; color: " <> mutedTextColor theme <> "; cursor: text; font-size: 0.76rem; font-weight: 700; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+
+paramNameInputStyle :: Theme -> String
+paramNameInputStyle theme =
+  "width: 100%; min-width: 0; height: 20px; box-sizing: border-box; padding: 0 4px; border: 1px solid " <> controlBorder theme <> "; border-radius: 4px; background: " <> controlBg theme <> "; color: " <> textColor theme <> "; font-size: 0.76rem; font-weight: 700; text-align: center;"
 
 knobValueStyle :: Theme -> String
 knobValueStyle theme =
@@ -629,6 +823,9 @@ handleAction = case _ of
   SelectTrack trackId ->
     sendClientMessage (SelectTrackMessage trackId)
 
+  SelectDuplicateTrackTarget songId ->
+    H.modify_ \st -> st { duplicateTrackTargetSong = Just songId }
+
   UpdateNewSongName name ->
     H.modify_ \st -> st { newSongName = name }
 
@@ -655,11 +852,49 @@ handleAction = case _ of
           sendClientMessage (CreateTrackMessage songId st.newTrackName)
           H.modify_ \st' -> st' { newTrackName = "" }
 
+  DuplicateSong -> do
+    st <- H.get
+    case st.currentSong of
+      Nothing ->
+        pure unit
+      Just songId ->
+        sendClientMessage (DuplicateSongMessage songId)
+
+  DuplicateTrack -> do
+    st <- H.get
+    case st.currentTrack of
+      Nothing ->
+        pure unit
+      Just trackId ->
+        case duplicateTrackTargetSongId st of
+          Nothing ->
+            pure unit
+          Just targetSongId ->
+            sendClientMessage (DuplicateTrackMessage trackId targetSongId)
+
   ToggleTheme ->
     H.modify_ \st -> st { theme = toggleTheme st.theme }
 
   IgnoreSelection ->
     pure unit
+
+  StartParamNameEdit cc ->
+    H.modify_ \st -> st { editingParamName = Just { cc: cc, draft: paramRawName st.params cc } }
+
+  UpdateParamNameDraft name ->
+    H.modify_ \st -> st { editingParamName = map (\edit -> edit { draft = name }) st.editingParamName }
+
+  CommitParamNameEdit ->
+    commitParamNameEdit
+
+  CommitParamNameEditOnKey key ->
+    case key of
+      "Enter" ->
+        commitParamNameEdit
+      "Escape" ->
+        H.modify_ \st -> st { editingParamName = Nothing }
+      _ ->
+        pure unit
 
   StartParamDrag cc startValue startY ->
     H.subscribe' \subscriptionId ->
@@ -670,6 +905,15 @@ handleAction = case _ of
 
   SetParamFromDrag cc value ->
     setParam cc value
+
+  SetParamFromWheel cc event -> do
+    H.liftEffect $ Event.preventDefault (Wheel.toEvent event)
+    let step = wheelParamStep event
+    if step == 0 then
+      pure unit
+    else do
+      st <- H.get
+      setParam cc (paramValue st.params cc + step)
 
   EndParamDrag subscriptionId ->
     H.unsubscribe subscriptionId
@@ -685,11 +929,13 @@ applyServerMessage = case _ of
       , tracks = snapshot.tracks
       , currentSong = snapshot.currentSong
       , currentTrack = snapshot.currentTrack
-      , params = snapshot.params
+      , params = paramsFromSnapshot snapshot.params
+      , duplicateTrackTargetSong = snapshot.currentSong
+      , editingParamName = Nothing
       }
 
   ParamUpdate cc value ->
-    H.modify_ \st -> st { params = Map.insert cc value st.params }
+    H.modify_ \st -> st { params = setParamValueInMap cc value st.params }
 
 setParam
   :: forall output m
@@ -699,8 +945,28 @@ setParam
   -> H.HalogenM State Action () output m Unit
 setParam cc rawValue = do
   let value = clampParam rawValue
-  H.modify_ \st -> st { params = Map.insert cc value st.params }
+  H.modify_ \st -> st { params = setParamValueInMap cc value st.params }
   sendClientMessage (SetParamMessage cc value)
+
+commitParamNameEdit
+  :: forall output m
+   . MonadEffect m
+  => H.HalogenM State Action () output m Unit
+commitParamNameEdit = do
+  st <- H.get
+  case st.editingParamName of
+    Nothing ->
+      pure unit
+    Just edit -> do
+      let previousName = paramRawName st.params edit.cc
+      if previousName == edit.draft then
+        H.modify_ \st' -> st' { editingParamName = Nothing }
+      else do
+        H.modify_ \st' -> st'
+          { editingParamName = Nothing
+          , params = setParamNameInMap edit.cc edit.draft st'.params
+          }
+        sendClientMessage (RenameParamMessage edit.cc edit.draft)
 
 sendClientMessage
   :: forall output m
@@ -752,7 +1018,13 @@ encodeClientJson = case _ of
     encodeJson { tag: "selectTrack", id: trackId }
   SetParamMessage cc value ->
     encodeJson { tag: "setParam", cc: cc, value: value }
+  RenameParamMessage cc name ->
+    encodeJson { tag: "renameParam", cc: cc, name: name }
   CreateSongMessage name ->
     encodeJson { tag: "createSong", name: name }
   CreateTrackMessage songId name ->
     encodeJson { tag: "createTrack", songId: songId, name: name }
+  DuplicateSongMessage songId ->
+    encodeJson { tag: "duplicateSong", songId: songId }
+  DuplicateTrackMessage trackId targetSongId ->
+    encodeJson { tag: "duplicateTrack", trackId: trackId, targetSongId: targetSongId }
