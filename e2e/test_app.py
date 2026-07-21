@@ -78,7 +78,9 @@ def main():
             httpd = serve_frontend(frontend_dir, frontend_port)
             try:
                 with sync_playwright() as p:
-                    browser = p.chromium.launch()
+                    # --no-sandbox: CI runners commonly lack the user-namespace
+                    # permissions Chromium's own sandbox needs.
+                    browser = p.chromium.launch(args=["--no-sandbox"])
                     page = browser.new_page()
                     console_errors = []
                     page.on(
