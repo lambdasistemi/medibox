@@ -40,7 +40,7 @@
         };
 
         inherit checks;
-        apps = import ./nix/apps.nix { inherit pkgs hpkgs checks; };
+        apps = import ./nix/apps.nix { inherit pkgs hpkgs checks backend frontend; };
 
         devShells.default = shell;
       });
