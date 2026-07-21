@@ -1,4 +1,3 @@
-dist
 cabal-dev
 *.o
 *.hi
@@ -9,4 +8,6 @@ result
 dist-newstyle
 *.db
 node_modules
+frontend/output
+frontend/.spago
 frontend/dist/index.js

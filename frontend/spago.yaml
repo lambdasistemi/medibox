@@ -1,0 +1,21 @@
+package:
+  name: medibox-frontend
+  dependencies:
+    - prelude
+    - effect
+    - aff
+    - console
+    - halogen
+    - argonaut-core
+    - argonaut-codecs
+    - ordered-collections
+    - maybe
+  bundle:
+    module: Main
+    outfile: dist/index.js
+    platform: browser
+    type: app
+
+workspace:
+  packageSet:
+    registry: 72.1.0

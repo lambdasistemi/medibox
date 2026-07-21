@@ -25,8 +25,6 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          config.permittedInsecurePackages =
-            [ "nodejs-20.20.2" "nodejs-slim-20.20.2" ];
           overlays = [
             purescript-overlay.overlays.default
             mkSpagoDerivation.overlays.default
