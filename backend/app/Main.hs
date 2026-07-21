@@ -14,12 +14,14 @@ override with @MEDIBOX_MIDI_CHANNEL@ if yours differs.
 defaultMidiChannel :: Int
 defaultMidiChannel = 1
 
-wsPort :: Int
-wsPort = 8080
+-- | Default WebSocket port; override with @MEDIBOX_WS_PORT@.
+defaultWsPort :: Int
+defaultWsPort = 8080
 
 main :: IO ()
 main = do
     dbPath <- fromMaybe "medibox.db" <$> lookupEnv "MEDIBOX_DB"
+    wsPort <- maybe defaultWsPort read <$> lookupEnv "MEDIBOX_WS_PORT"
     midiChannel <- maybe defaultMidiChannel read <$> lookupEnv "MEDIBOX_MIDI_CHANNEL"
     store <- openStore dbPath
     withMidi midiChannel $ \midi -> do

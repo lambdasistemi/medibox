@@ -75,11 +75,14 @@ def main():
 
         env = dict(os.environ)
         env["MEDIBOX_DB"] = db_path
-        # backend hardcodes port 8080; run the real one, no MIDI hardware
-        # is available here so Medibox.Midi runs in NoMidi mode.
+        # Use a dynamically-picked port: the runner is shared across CI
+        # jobs, so the hardcoded default (8080) can already be bound by
+        # another run. No MIDI hardware is available here so
+        # Medibox.Midi runs in NoMidi mode.
+        env["MEDIBOX_WS_PORT"] = str(backend_port)
         backend = subprocess.Popen([backend_bin], env=env)
         try:
-            wait_for_port(8080)
+            wait_for_port(backend_port)
             httpd = serve_frontend(frontend_dir, frontend_port)
             try:
                 with sync_playwright() as p:
@@ -88,8 +91,19 @@ def main():
                     # --disable-dev-shm-usage: /dev/shm is often tiny (or a
                     # restrictive tmpfs) in CI containers, which otherwise
                     # crashes the renderer process right after launch.
+                    # --no-zygote: this runner's process-spawning model
+                    # blocks Chromium's zygote fork outright (confirmed via
+                    # DEBUG=pw:browser: "Zygote could not fork" / "GPU
+                    # process isn't usable. Goodbye."), so bypass the
+                    # zygote helper process entirely instead of tuning GPU
+                    # flags around it.
                     browser = p.chromium.launch(
-                        args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+                        args=[
+                            "--no-sandbox",
+                            "--disable-dev-shm-usage",
+                            "--disable-gpu",
+                            "--no-zygote",
+                        ]
                     )
                     page = browser.new_page()
                     console_errors = []
@@ -99,7 +113,10 @@ def main():
                         if msg.type == "error" and "favicon" not in msg.text
                         else None,
                     )
-                    page.goto(f"http://127.0.0.1:{frontend_port}/index.html")
+                    page.goto(
+                        f"http://127.0.0.1:{frontend_port}/index.html"
+                        f"?wsport={backend_port}"
+                    )
 
                     # 1. Page loads with the auto-seeded Default song/track
                     # and 32 knobs, all showing value 0.
