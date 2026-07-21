@@ -8,7 +8,16 @@ let
     '';
   };
 
-  runnable = { inherit (checks) lint; } // { inherit format; };
+  frontend-format = pkgs.writeShellApplication {
+    name = "frontend-format";
+    runtimeInputs = [ pkgs.purs-tidy-bin.purs-tidy-0_10_0 ];
+    text = ''
+      purs-tidy format-in-place 'frontend/src/**/*.purs'
+    '';
+  };
+
+  runnable = { inherit (checks) lint frontend-lint; }
+    // { inherit format frontend-format; };
 in
 builtins.mapAttrs
   (_: prog: {

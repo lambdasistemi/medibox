@@ -24,7 +24,9 @@ jobs:
         run: >-
           nix build --quiet
           .#checks.x86_64-linux.backend
+          .#checks.x86_64-linux.frontend
           .#checks.x86_64-linux.lint
+          .#checks.x86_64-linux.frontend-lint
 
   build:
     name: Backend build + tests
@@ -39,6 +41,19 @@ jobs:
       - name: Build backend (runs test suite)
         run: nix build --quiet .#checks.x86_64-linux.backend
 
+  frontend-build:
+    name: Frontend build
+    needs: build-gate
+    runs-on: nixos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/cachix-action@v15
+        with:
+          name: paolino
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Build frontend bundle
+        run: nix build --quiet .#checks.x86_64-linux.frontend
+
   lint:
     name: Lint
     needs: build-gate
@@ -51,3 +66,16 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: fourmolu + hlint
         run: nix run --quiet .#lint
+
+  frontend-lint:
+    name: Frontend lint
+    needs: build-gate
+    runs-on: nixos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/cachix-action@v15
+        with:
+          name: paolino
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: purs-tidy
+        run: nix run --quiet .#frontend-lint

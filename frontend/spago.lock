@@ -8,12 +8,16 @@
             "aff",
             "argonaut-codecs",
             "argonaut-core",
+            "arrays",
             "console",
             "effect",
+            "either",
             "halogen",
+            "integers",
             "maybe",
             "ordered-collections",
-            "prelude"
+            "prelude",
+            "tuples"
           ]
         },
         "test": {
