@@ -23,7 +23,7 @@ spec = do
                     , "tracks" .= ([] :: [Value])
                     , "currentSong" .= (Nothing :: Maybe Int)
                     , "currentTrack" .= (Nothing :: Maybe Int)
-                    , "params" .= ([] :: [(Int, Int)])
+                    , "params" .= ([] :: [Value])
                     ]
 
         it "encodes song and track info with id/name(/position) fields" $ do
@@ -34,6 +34,20 @@ spec = do
                     [ "id" .= (2 :: Int)
                     , "name" .= ("Track 1" :: String)
                     , "position" .= (0 :: Int)
+                    ]
+
+        it "encodes param info with a nullable name" $ do
+            toJSON (ParamInfo 19 64 Nothing)
+                `shouldBe` object
+                    [ "cc" .= (19 :: Int)
+                    , "value" .= (64 :: Int)
+                    , "name" .= (Nothing :: Maybe String)
+                    ]
+            toJSON (ParamInfo 19 64 (Just "Cutoff"))
+                `shouldBe` object
+                    [ "cc" .= (19 :: Int)
+                    , "value" .= (64 :: Int)
+                    , "name" .= Just ("Cutoff" :: String)
                     ]
 
     describe "ClientMsg JSON shape" $ do
@@ -54,6 +68,18 @@ spec = do
         it "decodes createTrack" $
             decode "{\"tag\":\"createTrack\",\"songId\":1,\"name\":\"Track 1\"}"
                 `shouldBe` Just (CreateTrack 1 "Track 1")
+
+        it "decodes renameParam" $
+            decode "{\"tag\":\"renameParam\",\"cc\":19,\"name\":\"Cutoff\"}"
+                `shouldBe` Just (RenameParam 19 "Cutoff")
+
+        it "decodes duplicateSong" $
+            decode "{\"tag\":\"duplicateSong\",\"songId\":1}"
+                `shouldBe` Just (DuplicateSong 1)
+
+        it "decodes duplicateTrack" $
+            decode "{\"tag\":\"duplicateTrack\",\"trackId\":1,\"targetSongId\":2}"
+                `shouldBe` Just (DuplicateTrack 1 2)
 
         it "rejects an unknown tag" $
             decode "{\"tag\":\"bogus\"}" `shouldBe` (Nothing :: Maybe ClientMsg)

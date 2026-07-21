@@ -67,7 +67,7 @@ snapshot sync = do
         Just sid -> map fromTrack <$> Store.listTracks store sid
     params <- case mtid of
         Nothing -> pure []
-        Just tid -> Store.loadTrackParams store tid
+        Just tid -> map fromParam <$> Store.loadTrackParams store tid
     pure $ Snapshot songs tracks msid mtid params
 
 {- | React to a message coming in from one connected browser.
@@ -89,7 +89,7 @@ handleClientMsg sync = \case
             writeTVar (syncCurrentTrack sync) (Just tid)
         Store.setCurrentTrackId (syncStore sync) tid
         params <- Store.loadTrackParams (syncStore sync) tid
-        forM_ params $ uncurry (sendCC (syncMidi sync))
+        forM_ params $ \p -> sendCC (syncMidi sync) (Store.paramCC p) (Store.paramValue p)
         snap <- snapshot sync
         publish sync snap
     SelectSong sid -> do
@@ -107,5 +107,20 @@ handleClientMsg sync = \case
     CreateTrack sid name -> do
         atomically $ writeTVar (syncCurrentSong sync) (Just sid)
         void $ Store.createTrack (syncStore sync) sid name
+        snap <- snapshot sync
+        publish sync snap
+    RenameParam cc name -> do
+        mtid <- readTVarIO (syncCurrentTrack sync)
+        forM_ mtid $ \tid -> Store.renameParam (syncStore sync) tid cc name
+        snap <- snapshot sync
+        publish sync snap
+    DuplicateSong sid -> do
+        newSong <- Store.duplicateSong (syncStore sync) sid
+        atomically $ writeTVar (syncCurrentSong sync) (Just (Store.songId newSong))
+        snap <- snapshot sync
+        publish sync snap
+    DuplicateTrack tid targetSid -> do
+        void $ Store.duplicateTrack (syncStore sync) tid targetSid
+        atomically $ writeTVar (syncCurrentSong sync) (Just targetSid)
         snap <- snapshot sync
         publish sync snap
