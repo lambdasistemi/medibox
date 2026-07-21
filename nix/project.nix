@@ -4,11 +4,6 @@ let
 
   backend = hpkgs.callCabal2nix "medibox-backend" ../backend { };
 
-  nodeModules = pkgs.importNpmLock.buildNodeModules {
-    npmRoot = ../frontend;
-    nodejs = pkgs.nodejs_20;
-  };
-
   frontend = pkgs.mkSpagoDerivation {
     pname = "medibox-frontend";
     version = "0.1.0";
@@ -18,21 +13,10 @@ let
     nativeBuildInputs = [
       pkgs.purs
       pkgs.spago-unstable
-      pkgs.esbuild
-      pkgs.nodejs_20
+      pkgs.nodejs
     ];
     buildPhase = ''
-      ln -s ${nodeModules}/node_modules node_modules
-      esbuild src/bootstrap.js \
-        --bundle \
-        --outfile=dist/deps.js \
-        --format=iife \
-        --platform=browser \
-        --minify
-      spago bundle --offline --module Main
-      cat dist/deps.js dist/index.js > dist/bundle.js
-      mv dist/bundle.js dist/index.js
-      rm dist/deps.js
+      spago bundle --offline --module Main --outfile dist/index.js
     '';
     installPhase = ''
       mkdir -p $out
@@ -54,8 +38,7 @@ let
       pkgs.spago-unstable
       pkgs.purs-tidy-bin.purs-tidy-0_10_0
       pkgs.purescript-language-server
-      pkgs.esbuild
-      pkgs.nodejs_20
+      pkgs.nodejs
       pkgs.just
     ];
   };
