@@ -79,3 +79,16 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: purs-tidy
         run: nix run --quiet .#frontend-lint
+
+  e2e:
+    name: E2E (Playwright)
+    needs: build-gate
+    runs-on: nixos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/cachix-action@v15
+        with:
+          name: paolino
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Run browser E2E test against the real backend
+        run: nix run --quiet .#e2e
