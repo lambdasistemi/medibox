@@ -62,6 +62,11 @@ def query_db(db_path, sql, params=()):
 def main():
     backend_bin = os.environ["MEDIBOX_BACKEND_BIN"]
     frontend_dir = os.environ["MEDIBOX_FRONTEND_DIR"]
+    # Surface the actual browser process's own stdout/stderr instead of
+    # just Playwright's generic "Target ... has been closed" wrapper --
+    # needed to diagnose *why* it's closing on a given machine instead of
+    # guessing launch flags blindly.
+    os.environ["DEBUG"] = "pw:browser,pw:browser:verbose"
 
     with tempfile.TemporaryDirectory() as tmp:
         db_path = os.path.join(tmp, "medibox.db")
