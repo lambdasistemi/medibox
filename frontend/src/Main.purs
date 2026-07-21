@@ -62,11 +62,20 @@ type ParamNameEdit =
   , draft :: String
   }
 
+type ItemNameEdit =
+  { id :: Int
+  , draft :: String
+  }
+
 data Theme
   = Light
   | Dark
 
 derive instance eqTheme :: Eq Theme
+
+data RenameFocusTarget
+  = FocusSongName
+  | FocusTrackName
 
 type State =
   { songs :: Array SongInfo
@@ -77,7 +86,10 @@ type State =
   , newSongName :: String
   , newTrackName :: String
   , duplicateTrackTargetSong :: Maybe Int
+  , editingSongName :: Maybe ItemNameEdit
+  , editingTrackName :: Maybe ItemNameEdit
   , editingParamName :: Maybe ParamNameEdit
+  , pendingRenameFocus :: Maybe RenameFocusTarget
   , connection :: Maybe WS.WebSocketConnection
   , theme :: Theme
   }
@@ -106,6 +118,8 @@ data ClientMessage
   = SelectSongMessage Int
   | SelectTrackMessage Int
   | SetParamMessage Int Int
+  | RenameSongMessage Int String
+  | RenameTrackMessage Int String
   | RenameParamMessage Int String
   | CreateSongMessage String
   | CreateTrackMessage Int String
@@ -128,6 +142,14 @@ data Action
   | DuplicateTrack
   | ToggleTheme
   | IgnoreSelection
+  | StartSongNameEdit Int
+  | UpdateSongNameDraft String
+  | CommitSongNameEdit
+  | CommitSongNameEditOnKey String
+  | StartTrackNameEdit Int
+  | UpdateTrackNameDraft String
+  | CommitTrackNameEdit
+  | CommitTrackNameEditOnKey String
   | StartParamNameEdit Int
   | UpdateParamNameDraft String
   | CommitParamNameEdit
@@ -157,7 +179,10 @@ initialState _ =
   , newSongName: ""
   , newTrackName: ""
   , duplicateTrackTargetSong: Nothing
+  , editingSongName: Nothing
+  , editingTrackName: Nothing
   , editingParamName: Nothing
+  , pendingRenameFocus: Nothing
   , connection: Nothing
   , theme: Dark
   }
@@ -202,30 +227,76 @@ songsPanel st =
         [ HH.text "Songs" ]
     , HH.div
         [ HP.style controlRowStyle ]
-        [ songSelect st.theme st.currentSong st.songs
-        , HH.input
-            [ HP.type_ HP.InputText
-            , HP.placeholder "New song"
-            , HP.value st.newSongName
-            , HP.style (textInputStyle st.theme false)
-            , HE.onValueInput UpdateNewSongName
-            ]
-        , HH.button
-            [ HP.type_ HP.ButtonButton
-            , HP.disabled (st.newSongName == "")
-            , HP.style (createButtonStyle st.theme (st.newSongName == ""))
-            , HE.onClick \_ -> CreateSong
-            ]
-            [ HH.text "Create Song" ]
-        , HH.button
-            [ HP.type_ HP.ButtonButton
-            , HP.disabled (st.currentSong == Nothing)
-            , HP.style (createButtonStyle st.theme (st.currentSong == Nothing))
-            , HE.onClick \_ -> DuplicateSong
-            ]
-            [ HH.text "Duplicate" ]
-        ]
+        ( selectedSongNameControls st
+            <>
+              [ songSelect st.theme st.currentSong st.songs
+              , HH.input
+                  [ HP.type_ HP.InputText
+                  , HP.placeholder "New song"
+                  , HP.value st.newSongName
+                  , HP.style (textInputStyle st.theme false)
+                  , HE.onValueInput UpdateNewSongName
+                  ]
+              , HH.button
+                  [ HP.type_ HP.ButtonButton
+                  , HP.disabled (st.newSongName == "")
+                  , HP.style (createButtonStyle st.theme (st.newSongName == ""))
+                  , HE.onClick \_ -> CreateSong
+                  ]
+                  [ HH.text "Create Song" ]
+              , HH.button
+                  [ HP.type_ HP.ButtonButton
+                  , HP.disabled (st.currentSong == Nothing)
+                  , HP.style (createButtonStyle st.theme (st.currentSong == Nothing))
+                  , HE.onClick \_ -> DuplicateSong
+                  ]
+                  [ HH.text "Duplicate" ]
+              ]
+        )
     ]
+
+selectedSongNameControls :: forall m. State -> Array (H.ComponentHTML Action () m)
+selectedSongNameControls st = case st.currentSong of
+  Nothing ->
+    []
+  Just songId ->
+    [ songNameControl st.theme songId (songDisplayName st.songs songId) st.editingSongName ]
+
+songNameControl
+  :: forall m
+   . Theme
+  -> Int
+  -> String
+  -> Maybe ItemNameEdit
+  -> H.ComponentHTML Action () m
+songNameControl theme songId name editingSongName =
+  case editingSongName of
+    Just edit ->
+      if edit.id == songId then
+        HH.input
+          [ HP.type_ HP.InputText
+          , HP.value edit.draft
+          , HP.autofocus true
+          , HP.placeholder "Song name"
+          , HP.style (selectedNameInputStyle theme)
+          , HE.onValueInput UpdateSongNameDraft
+          , HE.onBlur \_ -> CommitSongNameEdit
+          , HE.onKeyDown \event -> CommitSongNameEditOnKey (Keyboard.key event)
+          ]
+      else
+        songNameButton theme songId name
+    _ ->
+      songNameButton theme songId name
+
+songNameButton :: forall m. Theme -> Int -> String -> H.ComponentHTML Action () m
+songNameButton theme songId name =
+  HH.button
+    [ HP.type_ HP.ButtonButton
+    , HP.style (selectedNameButtonStyle theme)
+    , HP.title "Rename song"
+    , HE.onClick \_ -> StartSongNameEdit songId
+    ]
+    [ HH.text name ]
 
 songSelect :: forall m. Theme -> Maybe Int -> Array SongInfo -> H.ComponentHTML Action () m
 songSelect theme currentSong songs =
@@ -253,31 +324,34 @@ tracksPanel st =
         [ HH.text "Tracks" ]
     , HH.div
         [ HP.style controlRowStyle ]
-        [ trackSelect st.theme st.currentSong st.currentTrack visibleTracks
-        , HH.input
-            [ HP.type_ HP.InputText
-            , HP.placeholder "New track"
-            , HP.value st.newTrackName
-            , HP.disabled noSongSelected
-            , HP.style (textInputStyle st.theme noSongSelected)
-            , HE.onValueInput UpdateNewTrackName
-            ]
-        , HH.button
-            [ HP.type_ HP.ButtonButton
-            , HP.disabled (noSongSelected || st.newTrackName == "")
-            , HP.style (createButtonStyle st.theme (noSongSelected || st.newTrackName == ""))
-            , HE.onClick \_ -> CreateTrack
-            ]
-            [ HH.text "Create Track" ]
-        , duplicateTargetSongSelect st.theme noTrackSelected (duplicateTrackTargetSongId st) st.songs
-        , HH.button
-            [ HP.type_ HP.ButtonButton
-            , HP.disabled noTrackSelected
-            , HP.style (createButtonStyle st.theme noTrackSelected)
-            , HE.onClick \_ -> DuplicateTrack
-            ]
-            [ HH.text "Duplicate" ]
-        ]
+        ( selectedTrackNameControls st
+            <>
+              [ trackSelect st.theme st.currentSong st.currentTrack visibleTracks
+              , HH.input
+                  [ HP.type_ HP.InputText
+                  , HP.placeholder "New track"
+                  , HP.value st.newTrackName
+                  , HP.disabled noSongSelected
+                  , HP.style (textInputStyle st.theme noSongSelected)
+                  , HE.onValueInput UpdateNewTrackName
+                  ]
+              , HH.button
+                  [ HP.type_ HP.ButtonButton
+                  , HP.disabled (noSongSelected || st.newTrackName == "")
+                  , HP.style (createButtonStyle st.theme (noSongSelected || st.newTrackName == ""))
+                  , HE.onClick \_ -> CreateTrack
+                  ]
+                  [ HH.text "Create Track" ]
+              , duplicateTargetSongSelect st.theme noTrackSelected (duplicateTrackTargetSongId st) st.songs
+              , HH.button
+                  [ HP.type_ HP.ButtonButton
+                  , HP.disabled noTrackSelected
+                  , HP.style (createButtonStyle st.theme noTrackSelected)
+                  , HE.onClick \_ -> DuplicateTrack
+                  ]
+                  [ HH.text "Duplicate" ]
+              ]
+        )
     ]
   where
   noSongSelected = st.currentSong == Nothing
@@ -287,6 +361,49 @@ tracksPanel st =
   visibleTracks = case st.currentSong of
     Nothing -> []
     Just _ -> st.tracks
+
+selectedTrackNameControls :: forall m. State -> Array (H.ComponentHTML Action () m)
+selectedTrackNameControls st = case st.currentTrack of
+  Nothing ->
+    []
+  Just trackId ->
+    [ trackNameControl st.theme trackId (trackDisplayName st.tracks trackId) st.editingTrackName ]
+
+trackNameControl
+  :: forall m
+   . Theme
+  -> Int
+  -> String
+  -> Maybe ItemNameEdit
+  -> H.ComponentHTML Action () m
+trackNameControl theme trackId name editingTrackName =
+  case editingTrackName of
+    Just edit ->
+      if edit.id == trackId then
+        HH.input
+          [ HP.type_ HP.InputText
+          , HP.value edit.draft
+          , HP.autofocus true
+          , HP.placeholder "Track name"
+          , HP.style (selectedNameInputStyle theme)
+          , HE.onValueInput UpdateTrackNameDraft
+          , HE.onBlur \_ -> CommitTrackNameEdit
+          , HE.onKeyDown \event -> CommitTrackNameEditOnKey (Keyboard.key event)
+          ]
+      else
+        trackNameButton theme trackId name
+    _ ->
+      trackNameButton theme trackId name
+
+trackNameButton :: forall m. Theme -> Int -> String -> H.ComponentHTML Action () m
+trackNameButton theme trackId name =
+  HH.button
+    [ HP.type_ HP.ButtonButton
+    , HP.style (selectedNameButtonStyle theme)
+    , HP.title "Rename track"
+    , HE.onClick \_ -> StartTrackNameEdit trackId
+    ]
+    [ HH.text name ]
 
 trackSelect
   :: forall m
@@ -530,6 +647,34 @@ paramRawName params cc = case Map.lookup cc params of
   Just param -> fromMaybe "" param.name
   Nothing -> ""
 
+songDisplayName :: Array SongInfo -> Int -> String
+songDisplayName songs songId = case Array.find (\song -> song.id == songId) songs of
+  Just song ->
+    if song.name == "" then fallback else song.name
+  Nothing ->
+    fallback
+  where
+  fallback = "Song " <> show songId
+
+songRawName :: Array SongInfo -> Int -> String
+songRawName songs songId = case Array.find (\song -> song.id == songId) songs of
+  Just song -> song.name
+  Nothing -> ""
+
+trackDisplayName :: Array TrackInfo -> Int -> String
+trackDisplayName tracks trackId = case Array.find (\track -> track.id == trackId) tracks of
+  Just track ->
+    if track.name == "" then fallback else track.name
+  Nothing ->
+    fallback
+  where
+  fallback = "Track " <> show trackId
+
+trackRawName :: Array TrackInfo -> Int -> String
+trackRawName tracks trackId = case Array.find (\track -> track.id == trackId) tracks of
+  Just track -> track.name
+  Nothing -> ""
+
 normalizeParamName :: Maybe String -> Maybe String
 normalizeParamName = case _ of
   Just "" -> Nothing
@@ -547,10 +692,46 @@ setParamNameInMap :: Int -> String -> Map Int ParamState -> Map Int ParamState
 setParamNameInMap cc name params =
   Map.insert cc { value: paramValue params cc, name: normalizeParamName (Just name) } params
 
+renameSongInArray :: Int -> String -> Array SongInfo -> Array SongInfo
+renameSongInArray songId name songs =
+  map rename songs
+  where
+  rename song =
+    if song.id == songId then song { name = name } else song
+
+renameTrackInArray :: Int -> String -> Array TrackInfo -> Array TrackInfo
+renameTrackInArray trackId name tracks =
+  map rename tracks
+  where
+  rename track =
+    if track.id == trackId then track { name = name } else track
+
 duplicateTrackTargetSongId :: State -> Maybe Int
 duplicateTrackTargetSongId st = case st.duplicateTrackTargetSong of
   Just songId -> Just songId
   Nothing -> st.currentSong
+
+songNameEditFromSnapshot :: Maybe RenameFocusTarget -> SnapshotPayload -> Maybe ItemNameEdit
+songNameEditFromSnapshot pendingRenameFocus snapshot = case pendingRenameFocus of
+  Just FocusSongName ->
+    case snapshot.currentSong of
+      Just songId ->
+        Just { id: songId, draft: songRawName snapshot.songs songId }
+      Nothing ->
+        Nothing
+  _ ->
+    Nothing
+
+trackNameEditFromSnapshot :: Maybe RenameFocusTarget -> SnapshotPayload -> Maybe ItemNameEdit
+trackNameEditFromSnapshot pendingRenameFocus snapshot = case pendingRenameFocus of
+  Just FocusTrackName ->
+    case snapshot.currentTrack of
+      Just trackId ->
+        Just { id: trackId, draft: trackRawName snapshot.tracks trackId }
+      Nothing ->
+        Nothing
+  _ ->
+    Nothing
 
 wheelParamStep :: Wheel.WheelEvent -> Int
 wheelParamStep event
@@ -637,6 +818,14 @@ selectStyle theme =
 textInputStyle :: Theme -> Boolean -> String
 textInputStyle theme disabled =
   "flex: 1 1 160px; min-width: 0; height: 36px; box-sizing: border-box; padding: 0 10px; border: 1px solid " <> controlBorder theme <> "; border-radius: 6px; background: " <> inputBg theme disabled <> "; color: " <> inputText theme disabled <> ";"
+
+selectedNameButtonStyle :: Theme -> String
+selectedNameButtonStyle theme =
+  "flex: 1 0 100%; min-width: 0; height: 28px; padding: 0 2px; border: 0; background: transparent; color: " <> textColor theme <> "; cursor: text; font-size: 1rem; font-weight: 700; letter-spacing: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+
+selectedNameInputStyle :: Theme -> String
+selectedNameInputStyle theme =
+  "flex: 1 0 100%; min-width: 0; height: 32px; box-sizing: border-box; padding: 0 8px; border: 1px solid " <> controlBorder theme <> "; border-radius: 4px; background: " <> controlBg theme <> "; color: " <> textColor theme <> "; font-size: 1rem; font-weight: 700; letter-spacing: 0;"
 
 createButtonStyle :: Theme -> Boolean -> String
 createButtonStyle theme disabled =
@@ -858,7 +1047,7 @@ handleAction = case _ of
       Nothing ->
         pure unit
       Just songId ->
-        sendClientMessage (DuplicateSongMessage songId)
+        sendClientMessageWithPendingRename FocusSongName (DuplicateSongMessage songId)
 
   DuplicateTrack -> do
     st <- H.get
@@ -870,13 +1059,49 @@ handleAction = case _ of
           Nothing ->
             pure unit
           Just targetSongId ->
-            sendClientMessage (DuplicateTrackMessage trackId targetSongId)
+            sendClientMessageWithPendingRename FocusTrackName (DuplicateTrackMessage trackId targetSongId)
 
   ToggleTheme ->
     H.modify_ \st -> st { theme = toggleTheme st.theme }
 
   IgnoreSelection ->
     pure unit
+
+  StartSongNameEdit songId ->
+    H.modify_ \st -> st { editingSongName = Just { id: songId, draft: songRawName st.songs songId } }
+
+  UpdateSongNameDraft name ->
+    H.modify_ \st -> st { editingSongName = map (\edit -> edit { draft = name }) st.editingSongName }
+
+  CommitSongNameEdit ->
+    commitSongNameEdit
+
+  CommitSongNameEditOnKey key ->
+    case key of
+      "Enter" ->
+        commitSongNameEdit
+      "Escape" ->
+        H.modify_ \st -> st { editingSongName = Nothing }
+      _ ->
+        pure unit
+
+  StartTrackNameEdit trackId ->
+    H.modify_ \st -> st { editingTrackName = Just { id: trackId, draft: trackRawName st.tracks trackId } }
+
+  UpdateTrackNameDraft name ->
+    H.modify_ \st -> st { editingTrackName = map (\edit -> edit { draft = name }) st.editingTrackName }
+
+  CommitTrackNameEdit ->
+    commitTrackNameEdit
+
+  CommitTrackNameEditOnKey key ->
+    case key of
+      "Enter" ->
+        commitTrackNameEdit
+      "Escape" ->
+        H.modify_ \st -> st { editingTrackName = Nothing }
+      _ ->
+        pure unit
 
   StartParamNameEdit cc ->
     H.modify_ \st -> st { editingParamName = Just { cc: cc, draft: paramRawName st.params cc } }
@@ -931,7 +1156,10 @@ applyServerMessage = case _ of
       , currentTrack = snapshot.currentTrack
       , params = paramsFromSnapshot snapshot.params
       , duplicateTrackTargetSong = snapshot.currentSong
+      , editingSongName = songNameEditFromSnapshot st.pendingRenameFocus snapshot
+      , editingTrackName = trackNameEditFromSnapshot st.pendingRenameFocus snapshot
       , editingParamName = Nothing
+      , pendingRenameFocus = Nothing
       }
 
   ParamUpdate cc value ->
@@ -947,6 +1175,46 @@ setParam cc rawValue = do
   let value = clampParam rawValue
   H.modify_ \st -> st { params = setParamValueInMap cc value st.params }
   sendClientMessage (SetParamMessage cc value)
+
+commitSongNameEdit
+  :: forall output m
+   . MonadEffect m
+  => H.HalogenM State Action () output m Unit
+commitSongNameEdit = do
+  st <- H.get
+  case st.editingSongName of
+    Nothing ->
+      pure unit
+    Just edit -> do
+      let previousName = songRawName st.songs edit.id
+      if previousName == edit.draft then
+        H.modify_ \st' -> st' { editingSongName = Nothing }
+      else do
+        H.modify_ \st' -> st'
+          { editingSongName = Nothing
+          , songs = renameSongInArray edit.id edit.draft st'.songs
+          }
+        sendClientMessage (RenameSongMessage edit.id edit.draft)
+
+commitTrackNameEdit
+  :: forall output m
+   . MonadEffect m
+  => H.HalogenM State Action () output m Unit
+commitTrackNameEdit = do
+  st <- H.get
+  case st.editingTrackName of
+    Nothing ->
+      pure unit
+    Just edit -> do
+      let previousName = trackRawName st.tracks edit.id
+      if previousName == edit.draft then
+        H.modify_ \st' -> st' { editingTrackName = Nothing }
+      else do
+        H.modify_ \st' -> st'
+          { editingTrackName = Nothing
+          , tracks = renameTrackInArray edit.id edit.draft st'.tracks
+          }
+        sendClientMessage (RenameTrackMessage edit.id edit.draft)
 
 commitParamNameEdit
   :: forall output m
@@ -967,6 +1235,21 @@ commitParamNameEdit = do
           , params = setParamNameInMap edit.cc edit.draft st'.params
           }
         sendClientMessage (RenameParamMessage edit.cc edit.draft)
+
+sendClientMessageWithPendingRename
+  :: forall output m
+   . MonadEffect m
+  => RenameFocusTarget
+  -> ClientMessage
+  -> H.HalogenM State Action () output m Unit
+sendClientMessageWithPendingRename focusTarget message = do
+  st <- H.get
+  case st.connection of
+    Nothing ->
+      pure unit
+    Just connection -> do
+      H.modify_ \st' -> st' { pendingRenameFocus = Just focusTarget }
+      H.liftEffect $ WS.send connection (encodeClientMessage message)
 
 sendClientMessage
   :: forall output m
@@ -1018,6 +1301,10 @@ encodeClientJson = case _ of
     encodeJson { tag: "selectTrack", id: trackId }
   SetParamMessage cc value ->
     encodeJson { tag: "setParam", cc: cc, value: value }
+  RenameSongMessage songId name ->
+    encodeJson { tag: "renameSong", songId: songId, name: name }
+  RenameTrackMessage trackId name ->
+    encodeJson { tag: "renameTrack", trackId: trackId, name: name }
   RenameParamMessage cc name ->
     encodeJson { tag: "renameParam", cc: cc, name: name }
   CreateSongMessage name ->
