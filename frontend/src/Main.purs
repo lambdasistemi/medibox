@@ -985,9 +985,10 @@ handleAction = case _ of
   Initialize -> do
     { emitter, listener } <- H.liftEffect HS.create
     void $ H.subscribe emitter
+    url <- H.liftEffect WS.wsUrl
     connection <- H.liftEffect $
       WS.connect
-        "ws://localhost:8080/ws"
+        url
         (\message -> HS.notify listener (ReceiveMessage message))
         (HS.notify listener SocketOpened)
         (HS.notify listener SocketClosed)

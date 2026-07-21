@@ -23,3 +23,8 @@ export const send = (socket) => (message) => () => {
     socket.send(message);
   }
 };
+
+export const wsUrl = () => {
+  const port = new URLSearchParams(window.location.search).get("wsport") || "8080";
+  return `ws://localhost:${port}/ws`;
+};
