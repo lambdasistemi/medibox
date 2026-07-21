@@ -17,10 +17,17 @@ module Medibox.Store (
     setCurrentTrackId,
 ) where
 
+import Control.Monad (forM_, when)
 import Data.Text (Text)
 import Database.SQLite.Simple
 
 newtype Store = Store Connection
+
+{- | Number of physical CC controls on the BCR2000, seeded to 0 for
+the auto-created default song/track.
+-}
+physicalCCCount :: Int
+physicalCCCount = 32
 
 data Song = Song {songId :: Int, songName :: Text}
     deriving (Eq, Show)
@@ -46,7 +53,22 @@ openStore path = do
             \(track_id INTEGER NOT NULL, cc INTEGER NOT NULL, value INTEGER NOT NULL, \
             \PRIMARY KEY (track_id, cc))"
     execute_ conn "CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)"
-    pure $ Store conn
+    let store = Store conn
+    ensureDefaultSong store
+    pure store
+
+{- | On a fresh database, create a "Default" song/track with every
+physical CC seeded to 0, so the UI always has something to select
+and the device gets a known-zero starting state.
+-}
+ensureDefaultSong :: Store -> IO ()
+ensureDefaultSong store = do
+    songs <- listSongs store
+    when (null songs) $ do
+        song <- createSong store "Default"
+        track <- createTrack store (songId song) "Default"
+        forM_ [0 .. physicalCCCount - 1] $ \cc -> setParam store (trackId track) cc 0
+        setCurrentTrackId store (trackId track)
 
 listSongs :: Store -> IO [Song]
 listSongs (Store conn) =
