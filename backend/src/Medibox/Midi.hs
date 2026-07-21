@@ -14,6 +14,8 @@ module Medibox.Midi (
 ) where
 
 import Control.Concurrent (ThreadId, forkIO)
+import Control.Exception (SomeException)
+import Control.Exception qualified as Exception
 import Control.Monad (forever, void, when)
 import Sound.ALSA.Exception qualified as AlsaExc
 import Sound.ALSA.Sequencer qualified as SndSeq
@@ -23,20 +25,38 @@ import Sound.ALSA.Sequencer.Connect qualified as Connect
 import Sound.ALSA.Sequencer.Event qualified as Event
 import Sound.ALSA.Sequencer.Port qualified as Port
 
--- | A running ALSA sequencer client with one CC-in / CC-out port.
-data Midi = Midi
-    { midiSeq :: SndSeq.T SndSeq.DuplexMode
-    , midiClientId :: Client.T
-    , midiPort :: Port.T
-    , midiChannel :: Int
-    }
+{- | Either a running ALSA sequencer client with one CC-in / CC-out
+port, or a stand-in used when no ALSA sequencer is available on
+this machine (e.g. CI runners with no MIDI hardware) -- the rest
+of the app runs the same either way, MIDI just becomes a no-op.
+-}
+data Midi
+    = RealMidi
+        { midiSeq :: SndSeq.T SndSeq.DuplexMode
+        , midiClientId :: Client.T
+        , midiPort :: Port.T
+        , midiChannel :: Int
+        }
+    | NoMidi
 
 {- | Open the ALSA client and run the given action with a handle
 usable for 'sendCC' and 'listen'. The client and its ports are
-torn down when the action returns.
+torn down when the action returns. If no ALSA sequencer is available
+at all, logs a warning and runs the action with a 'Midi' handle that
+silently no-ops instead of failing to start.
 -}
 withMidi :: Int -> (Midi -> IO a) -> IO a
 withMidi channel action =
+    catchAny (openReal channel action) $ \e -> do
+        putStrLn $
+            "midi_unavailable: " ++ show e ++ " -- running without MIDI I/O"
+        action NoMidi
+  where
+    catchAny :: IO a -> (SomeException -> IO a) -> IO a
+    catchAny = Exception.catch
+
+openReal :: Int -> (Midi -> IO a) -> IO a
+openReal channel action =
     SndSeq.withDefault SndSeq.Block $ \h -> do
         Client.setName h "medibox"
         cid <- Client.getId h
@@ -51,16 +71,19 @@ withMidi channel action =
                 ]
             )
             Port.typeMidiGeneric
-            $ \p -> action (Midi h cid p channel)
+            $ \p -> action (RealMidi h cid p channel)
 
 {- | Spawn a reader thread that calls @onCC cc value@ for every
-incoming Control Change on the handle's channel.
+incoming Control Change on the handle's channel. A no-op when MIDI
+is unavailable.
 -}
-listen :: Midi -> (Int -> Int -> IO ()) -> IO ThreadId
-listen midi onCC = forkIO $ reportLoop midi onCC
+listen :: Midi -> (Int -> Int -> IO ()) -> IO (Maybe ThreadId)
+listen NoMidi _ = pure Nothing
+listen midi@RealMidi{} onCC = Just <$> forkIO (reportLoop midi onCC)
 
 reportLoop :: Midi -> (Int -> Int -> IO ()) -> IO ()
-reportLoop Midi{midiSeq = h, midiChannel = channel} onCC =
+reportLoop NoMidi _ = pure ()
+reportLoop RealMidi{midiSeq = h, midiChannel = channel} onCC =
     (`AlsaExc.catch` \e -> putStrLn $ "midi_exception: " ++ AlsaExc.show e) $
         forever $ do
             ev <- Event.input h
@@ -77,10 +100,11 @@ reportLoop Midi{midiSeq = h, midiChannel = channel} onCC =
 
 {- | Send a Control Change to whatever is subscribed to our output
 port (the BCR2000, once connected via @aconnect medibox:0
-<device>@).
+<device>@). A no-op when MIDI is unavailable.
 -}
 sendCC :: Midi -> Int -> Int -> IO ()
-sendCC Midi{midiSeq = h, midiClientId = cid, midiPort = p, midiChannel = channel} cc v =
+sendCC NoMidi _ _ = pure ()
+sendCC RealMidi{midiSeq = h, midiClientId = cid, midiPort = p, midiChannel = channel} cc v =
     (`AlsaExc.catch` \e -> putStrLn $ "midi_exception: " ++ AlsaExc.show e) $
         void $
             Event.outputDirect h $
